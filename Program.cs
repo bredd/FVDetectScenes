@@ -11,12 +11,16 @@ namespace FVDetectScenes
     class Program
     {
         const string c_syntax =
-@"Syntax: FVDetectScenes <filename>
+@"Syntax: FVDetectScenes <filename> [-sceneThreshold <value>]
    Filename should be a video file such as .mp4.
-   Wildcards are acceptable.";
+   Wildcards are acceptable.
+
+   Default scene threshold is 0.4. Should be a decimal number between
+   0.0 and 1.0";
 
         static bool s_clSyntaxError;
         static string s_clFilePattern;
+        static double s_clSceneThreshold = 0.4;
 
         static void Main(string[] args)
         {
@@ -42,13 +46,45 @@ namespace FVDetectScenes
 
         static void ParseCommandLine(string[] args)
         {
-            if (args.Length != 1)
+            for (int argi = 0; argi < args.Length; ++argi)
+            {
+                var arg = args[argi];
+
+                switch (arg.ToLowerInvariant())
+                {
+                    case "-h":
+                    case "-?":
+                    case "-help":
+                    case "/h":
+                    case "/?":
+                        s_clSyntaxError = true;
+                        return;
+
+                    case "-scenethreshold":
+                        if (argi > args.Length - 2)
+                        {
+                            throw new Exception("No value for -sceneThreshold");
+                        }
+                        ++argi;
+                        s_clSceneThreshold = double.Parse(args[argi]);
+                        break;
+
+                    default:
+                        if (s_clFilePattern == null)
+                        {
+                            s_clFilePattern = arg;
+                        }
+                        else
+                        {
+                            throw new Exception("Unexpected argument: " + arg);
+                        }
+                        break;
+                }
+            }
+            if (s_clFilePattern == null)
             {
                 s_clSyntaxError = true;
-                return;
             }
-
-            s_clFilePattern = args[0];
         }
 
         static void ProcessFiles(string filePattern)
@@ -60,7 +96,7 @@ namespace FVDetectScenes
             string pattern = Path.GetFileName(filePattern);
             foreach(string filename in Directory.GetFiles(directory, pattern))
             {
-                var processor = new FileProcessor(filename);
+                var processor = new FileProcessor(filename, s_clSceneThreshold);
                 if (processor.OutputExists)
                 {
                     Console.WriteLine($"Skipping: {filename}");
@@ -76,14 +112,15 @@ namespace FVDetectScenes
 
     class FileProcessor
     {
-        const string c_sceneThreshold = "0.4";
         const string c_outputSuffix = " scenes.csv";
 
         string m_inputFilename;
         string m_outputFilename;
         TextWriter m_output;
 
-        public FileProcessor(string filename)
+        string m_sceneThreshold = "0.4";
+
+        public FileProcessor(string filename, double sceneThreshold)
         {
             m_inputFilename = filename;
             if (!File.Exists(m_inputFilename))
@@ -92,6 +129,9 @@ namespace FVDetectScenes
             m_outputFilename =
                 Path.Combine(Path.GetDirectoryName(m_inputFilename),
                 Path.GetFileNameWithoutExtension(m_inputFilename) + c_outputSuffix);
+
+            m_sceneThreshold = sceneThreshold.ToString();
+            Console.WriteLine("SceneThreshold: " + m_sceneThreshold);
         }
 
         public bool OutputExists
@@ -112,7 +152,7 @@ namespace FVDetectScenes
                 m_output.WriteLine("seconds");  // CSV header - only one column
 
                 string appName = "ffmpeg.exe";
-                string arguments = $"-hide_banner -i \"{m_inputFilename}\" -filter:v \"select='gt(scene,{c_sceneThreshold})',showinfo\" -f null -";
+                string arguments = $"-hide_banner -i \"{m_inputFilename}\" -filter:v \"select='gt(scene,{m_sceneThreshold})',showinfo\" -f null -";
 
                 var psi = new ProcessStartInfo(appName, arguments);
                 psi.UseShellExecute = false;
